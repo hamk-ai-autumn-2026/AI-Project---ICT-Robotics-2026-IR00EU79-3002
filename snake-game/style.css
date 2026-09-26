@@ -1,0 +1,132 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.game-container {
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 30px;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+h1 {
+  color: #4ecca3;
+  font-size: 2rem;
+  margin-bottom: 15px;
+  text-shadow: 0 2px 10px rgba(78, 204, 163, 0.3);
+}
+
+.score-board {
+  display: flex;
+  justify-content: space-between;
+  color: #e0e0e0;
+  font-size: 1.1rem;
+  margin-bottom: 15px;
+  padding: 0 10px;
+}
+
+.score-board span {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 6px 16px;
+  border-radius: 20px;
+}
+
+#score,
+#high-score {
+  color: #4ecca3;
+  font-weight: bold;
+}
+
+.audio-controls {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.audio-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: #a0a0a0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.audio-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.audio-btn.active {
+  background: rgba(78, 204, 163, 0.2);
+  color: #4ecca3;
+  border-color: #4ecca3;
+}
+
+canvas {
+  border: 3px solid #4ecca3;
+  border-radius: 8px;
+  background: #0a0a1a;
+  display: block;
+  margin: 0 auto;
+  box-shadow: 0 0 20px rgba(78, 204, 163, 0.2);
+}
+
+.game-over {
+  margin-top: 15px;
+  color: #e0e0e0;
+}
+
+.game-over h2 {
+  color: #e94560;
+  font-size: 1.5rem;
+  margin-bottom: 8px;
+}
+
+.game-over p {
+  margin-bottom: 12px;
+  font-size: 1.1rem;
+}
+
+#restart-btn {
+  background: #4ecca3;
+  color: #1a1a2e;
+  border: none;
+  padding: 10px 30px;
+  font-size: 1rem;
+  font-weight: bold;
+  border-radius: 25px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+#restart-btn:hover {
+  background: #45b894;
+  transform: scale(1.05);
+  box-shadow: 0 4px 15px rgba(78, 204, 163, 0.4);
+}
+
+.instructions {
+  color: #a0a0a0;
+  margin-top: 15px;
+  font-size: 0.9rem;
+}
+
+.hidden {
+  display: none;
+}

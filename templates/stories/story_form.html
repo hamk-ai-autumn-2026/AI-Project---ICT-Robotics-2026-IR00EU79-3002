@@ -1,0 +1,79 @@
+{% extends "stories/base.html" %}
+{% load static %}
+{% block title %}Create a Story | Poseidon's Story Book{% endblock %}
+{% block content %}
+    <main class="shell">
+      <section class="hero">
+        <span class="eyebrow">✨ Personalized AI Storybook ✨</span>
+        <h1>A little story, made just for them.</h1>
+        <p>Tell us about a child and we'll paint a magical storybook they can call their very own — ready to read or download as an eBook.</p>
+      </section>
+      <section class="card">
+        <form id="story-form" novalidate>
+          {% csrf_token %}
+          <div id="form-error" class="alert" hidden></div>
+          {% for field in form %}
+          <label class="field" for="{{ field.id_for_label }}">
+            <span>{{ field.label }}</span>
+            {% if field.name == "child_appearance" %}<small>Used to keep illustrations consistent.</small>{% endif %}
+            {{ field }}
+            <strong class="field-error" data-error="{{ field.name }}"></strong>
+          </label>
+          {% endfor %}
+          <button type="submit" id="submit-button">Create storybook</button>
+        </form>
+        <div id="success" class="success" hidden>
+          <span class="success-icon">✦</span>
+          <h2 id="success-title">Story saved!</h2>
+          <p id="success-copy"></p>
+          <div id="generating" class="generating" hidden>
+            <span class="spinner"></span> Writing the story and painting the pictures...
+          </div>
+          <button type="button" class="secondary" id="reset-button">Create another story</button>
+        </div>
+      </section>
+      <section id="storybook" class="storybook" hidden>
+        <div class="storybook-header">
+          <h2 id="storybook-title"></h2>
+          <p class="reader-byline" id="reader-byline"></p>
+          <p class="reader-progress" id="reader-progress" aria-live="polite"></p>
+          <p class="reader-generation-status" id="reader-generation-status" role="status" aria-live="polite"></p>
+          <div class="reader-actions">
+            <a id="download-link" class="download-button" href="#" download>Download book (PDF)</a>
+            <button type="button" class="secondary reader-new-book" id="new-book-button">Create another</button>
+          </div>
+          <p id="download-status" class="download-status" role="status" aria-live="polite"></p>
+        </div>
+        <section id="book-reader" class="book-reader" aria-label="Storybook reader">
+          <button type="button" class="reader-arrow" data-reader-previous aria-label="Previous page">←</button>
+          <article class="book-page-view">
+            <div class="book-illustration"><img data-reader-image alt="" hidden><span data-reader-placeholder aria-hidden="true">✦</span></div>
+            <div class="book-copy"><span data-reader-counter aria-live="polite"></span><p data-reader-text></p></div>
+          </article>
+          <button type="button" class="reader-arrow" data-reader-next aria-label="Next page">→</button>
+        </section>
+        <div class="reader-tools">
+          <button type="button" class="text-button" id="toggle-pages" aria-expanded="false">View all pages</button>
+        </div>
+        <section class="publish-panel" aria-labelledby="publish-heading">
+          <div><span class="section-kicker">SHARE YOUR STORY</span><h3 id="publish-heading">Add it to the community library?</h3><p>The title, story text, and illustrations will be visible to anyone. The story may include the child's name. You can remove it from this page later.</p></div>
+          <label id="publish-consent-label" class="publish-consent"><input id="publish-consent" type="checkbox"> I want to share this story publicly.</label>
+          <button type="button" class="button-link" id="publish-button" disabled>Add to community library</button>
+          <p id="publish-status" role="status" aria-live="polite"></p>
+          <a id="public-book-link" class="text-button" href="#" hidden>Open its library page <span aria-hidden="true">→</span></a>
+        </section>
+        <div id="storybook-pages" class="storybook-pages" hidden></div>
+      </section>
+    </main>
+    <section class="home-sections" aria-label="About storybooks">
+      <section class="content-section how-section">
+        <header class="section-heading"><span class="section-kicker">A LITTLE MAGIC, STEP BY STEP</span><h2>How it works</h2><p>From a few details to a book you can read together.</p></header>
+        <div class="steps-grid"><article><span>01</span><h3>Tell us who it's for</h3><p>Add a name, appearance, favorite theme, and reading level.</p></article><article><span>02</span><h3>Choose the feeling</h3><p>Pick an adventure and a kind lesson to weave into the story.</p></article><article><span>03</span><h3>Make the story</h3><p>Generate a new tale with illustrated pages made for your reader.</p></article><article><span>04</span><h3>Read and keep it</h3><p>Enjoy the finished book on screen or download its PDF.</p></article></div>
+      </section>
+      <section class="content-section age-section"><header class="section-heading"><span class="section-kicker">GROWING WITH EVERY READER</span><h2>Choose a reading level</h2><p>Story language and length adapt to the age range you choose.</p></header><div class="age-grid"><article><span>AGES 0–2</span><h3>Toddlers</h3><p>Very simple words and just a few words per page.</p></article><article><span>AGES 3–5</span><h3>Beginner</h3><p>Short, gentle stories with simple words.</p></article><article><span>AGES 6–9</span><h3>Early reader</h3><p>Easy vocabulary and exciting discoveries.</p></article><article><span>AGES 10+</span><h3>Confident reader</h3><p>Richer details and a little more story to explore.</p></article></div></section>
+      <section class="community-band"><div><span class="section-kicker">FROM OUR COMMUNITY</span><h2>Stories are better shared</h2><p>Visit the library to discover what's on the shelf.</p></div><a class="button-link button-light" href="/library/">Browse the library <span aria-hidden="true">→</span></a></section>
+      <section class="content-section faq-section"><header class="section-heading"><span class="section-kicker">GOOD TO KNOW</span><h2>Frequently asked questions</h2></header><div class="faq-grid"><details><summary>How long does it take?</summary><p>Generation time depends on the text and illustration providers configured for this app.</p></details><details><summary>Can I save or print the story?</summary><p>Yes. Once a story finishes generating, use the PDF download button to keep or print it.</p></details><details><summary>Are stories suitable for children?</summary><p>Stories are designed for young readers, but an adult should review generated content before sharing.</p></details><details><summary>Can I include more than one child?</summary><p>This version creates a story around one main character at a time.</p></details><details><summary>Can I add a reference photo?</summary><p>Photo uploads are not enabled in this version. Add a written appearance description to guide illustrations.</p></details><details><summary>Is story creation free?</summary><p>There is no checkout in this version. Create a story and download the completed PDF from the app.</p></details></div></section>
+    </section>
+    <script src="{% static 'book_reader.js' %}?v=4"></script>
+    <script src="{% static 'stories.js' %}?v=4"></script>
+{% endblock %}

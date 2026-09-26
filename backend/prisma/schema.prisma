@@ -1,0 +1,92 @@
+// Prisma schema for the Personalized AI Storybook Generator
+// Run `npm run prisma:generate` after editing, and `npm run prisma:migrate` to apply changes to the DB.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// A registered user (parent/teacher). If using Supabase Auth, `id` mirrors the Supabase auth user UUID
+// so we don't have to duplicate auth logic on our own backend.
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  // Only used if we roll our own email/password auth instead of Supabase Auth.
+  passwordHash String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stories Story[]
+}
+
+// One generated storybook. Holds the child/story inputs plus the top-level generated title.
+model Story {
+  id        String      @id @default(uuid())
+  // Nullable for now: auth isn't built yet (see project build plan step 10).
+  // Once auth lands, new stories will always set this; existing anonymous
+  // stories just won't show up on any user's dashboard.
+  userId    String?
+  user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // --- Form inputs used to prompt the LLM ---
+  childName      String
+  childAppearance String
+  favoriteTheme  String // e.g. "dinosaurs", "space", "favorite animal: fox"
+  readingLevel   String // e.g. "beginner", "early-reader", "confident-reader"
+  moralLesson    String // e.g. "sharing is caring"
+
+  // --- LLM output ---
+  title     String?
+  status    StoryStatus @default(DRAFT) // tracks generation pipeline progress
+  errorMessage String?  // last error, if generation failed, surfaced to the user
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pages Page[]
+}
+
+enum StoryStatus {
+  DRAFT           // form submitted, outline not yet generated
+  OUTLINE_READY   // outline (title + page summaries) generated
+  GENERATING      // page text/images being generated
+  COMPLETE        // all pages have text + image
+  FAILED          // generation failed; see errorMessage
+}
+
+// A single page of the storybook: one summary -> expanded text -> illustration prompt -> image asset.
+model Page {
+  id          String   @id @default(uuid())
+  storyId     String
+  story       Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  pageNumber  Int      // 1-based order within the story
+  summary     String   // short beat from the outline step, e.g. "Mira meets a friendly fox in the forest"
+  text        String?  // full page text, expanded from `summary` via Claude
+  imagePrompt String?  // illustration prompt derived from `text`, sent to the image API
+  moderationFlag Boolean @default(false) // set true if text or imagePrompt failed a moderation check
+
+  asset Asset?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storyId, pageNumber])
+}
+
+// Generated image (or other future asset types) tied to a page, stored in Supabase Storage / S3.
+model Asset {
+  id        String   @id @default(uuid())
+  pageId    String   @unique
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  url       String   // public/signed URL to the stored image
+  provider  String   // e.g. "openai", "stability"
+  storagePath String // path/key within the storage bucket, for deletion/regeneration
+
+  createdAt DateTime @default(now())
+}

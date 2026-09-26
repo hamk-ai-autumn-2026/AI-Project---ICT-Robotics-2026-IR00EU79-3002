@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake Game</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="game-container">
+    <h1>🐍 Snake Game</h1>
+
+    <div class="score-board">
+      <span>Score: <span id="score">0</span></span>
+      <span>High Score: <span id="high-score">0</span></span>
+    </div>
+
+    <div class="audio-controls">
+      <button id="sound-btn" class="audio-btn" title="Toggle sound effects">🔊 SFX</button>
+      <button id="music-btn" class="audio-btn" title="Toggle background music">🎵 Music</button>
+    </div>
+
+    <canvas id="game-canvas" width="400" height="400"></canvas>
+
+    <div class="game-over hidden" id="game-over">
+      <h2>Game Over!</h2>
+      <p>Your score: <span id="final-score">0</span></p>
+      <button id="restart-btn">Play Again</button>
+    </div>
+
+    <p class="instructions">Use Arrow Keys or WASD to move. Press Space to pause.</p>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

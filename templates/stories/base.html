@@ -1,0 +1,37 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#fff8f3">
+    <title>{% block title %}Poseidon's Story Book{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'stories.css' %}?v=5">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Poseidon's Story Book home"><span class="brand-mark">✦</span><span>Poseidon's Story Book</span></a>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="/library/">Story Library</a>
+        <a href="/pricing/">Pricing</a>
+        <a href="/about/">About</a>
+        <a href="/contact/">Contact</a>
+        <a href="/auth/">My Books</a>
+        <a class="nav-create" href="/">Create Story <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+    {% block content %}{% endblock %}
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div class="footer-about">
+          <a class="brand" href="/"><span class="brand-mark">✦</span><span>Poseidon's Story Book</span></a>
+          <p>Personalized adventures that help young readers see themselves as the hero.</p>
+        </div>
+        <div><h2>Explore</h2><a href="/library/">Story Library</a><a href="/auth/">My Books</a><a href="/pricing/">Pricing</a><a href="/about/">About</a><a href="/contact/">Contact</a></div>
+        <div><h2>Information</h2><a href="/privacy/">Privacy Policy</a><a href="/terms/">Terms of Service</a><a href="/disclaimer/">Disclaimer</a></div>
+        <div class="footer-cta"><h2>Ready for an adventure?</h2><p>Make a story starring your favorite little reader.</p><a class="footer-button" href="/">Start creating <span aria-hidden="true">→</span></a></div>
+      </div>
+      <div class="footer-bottom"><span>© 2026 Poseidon's Story Book</span><span>Made for the next chapter.</span></div>
+    </footer>
+  </body>
+</html>

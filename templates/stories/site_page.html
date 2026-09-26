@@ -1,0 +1,59 @@
+{% extends "stories/base.html" %}
+{% block title %}{{ title }} | Poseidon's Story Book{% endblock %}
+{% block content %}
+<main class="page-shell">
+  <header class="page-heading">
+    <span class="eyebrow">POSEIDON'S STORY BOOK</span>
+    <h1>{{ title }}</h1>
+    <p>{{ intro }}</p>
+  </header>
+
+  {% if page == "library" %}
+  {% if books %}
+  <section class="community-books" aria-label="Community storybooks">
+    {% for book in books %}
+    <article class="community-book">
+      {% if book.cover_url %}<img src="{{ book.cover_url }}" alt="Cover illustration for {{ book.title }}" loading="lazy">{% else %}<div class="community-cover-placeholder" aria-hidden="true">✦</div>{% endif %}
+      <div class="community-book-copy"><span class="section-kicker">{{ book.reading_level }}</span><h2>{{ book.title }}</h2><div class="community-book-actions"><a class="book-read-link" href="/library/{{ book.id }}/">Read this book <span aria-hidden="true">→</span></a><a class="book-download-link" href="/api/stories/{{ book.id }}/download/" download>Download PDF</a></div></div>
+    </article>
+    {% endfor %}
+  </section>
+  {% else %}
+  <section class="empty-library" aria-labelledby="library-empty-title">
+    <div class="empty-book" aria-hidden="true"><span>✦</span><strong>Once<br>upon<br>a time</strong></div>
+    <div><span class="section-kicker">A shelf waiting for stories</span><h2 id="library-empty-title">No community stories yet</h2><p>Be the first to create a new adventure. Your finished book will be ready to read and download.</p><a class="button-link" href="/">Create the first story <span aria-hidden="true">→</span></a></div>
+  </section>
+  {% endif %}
+  {% elif page == "pricing" %}
+  <section class="pricing-grid" aria-label="Storybook plans">
+    <article class="price-card"><span class="section-kicker">FREE FOREVER</span><h2>Story creation</h2><p class="price">$0</p><p>No card required. Create stories with custom details and illustrated pages.</p><ul><li>Story generation</li><li>Age-based reading levels</li><li>PDF download in this build</li></ul><a class="button-link" href="/">Start a story <span aria-hidden="true">→</span></a></article>
+    <article class="price-card price-featured"><span class="section-kicker">ONE-TIME</span><h2>PDF download</h2><p class="price">$2.99</p><p>One high-quality, print-ready book download.</p><ul><li>Everything in Free</li><li>Print-ready format</li><li>Keep the book forever</li></ul><button class="button-link unavailable-button" type="button" disabled>Checkout unavailable</button></article>
+    <article class="price-card"><span class="section-kicker">FAMILY PLAN</span><h2>Monthly downloads</h2><p class="price">$9.99 <small>/ month</small></p><p>For families who want a regular shelf of personalized books.</p><ul><li>Everything in Free</li><li>Up to five PDF downloads/month</li><li>Cancel anytime</li></ul><button class="button-link unavailable-button" type="button" disabled>Checkout unavailable</button></article>
+  </section>
+  <p class="availability-note" id="pricing-note">Pricing shown here follows the reference site. Paid subscriptions and checkout are not enabled in this version; story creation and PDF downloads currently work without payment.</p>
+  <section class="benefit-section"><h2>Why keep a PDF?</h2><div class="benefit-grid"><article><span aria-hidden="true">◎</span><h3>A thoughtful gift</h3><p>Make a one-of-a-kind story for a birthday, holiday, or just-because day.</p></article><article><span aria-hidden="true">▤</span><h3>A lasting keepsake</h3><p>Save a story that your family can read together again and again.</p></article><article><span aria-hidden="true">✧</span><h3>Ready to print</h3><p>Keep the illustrated pages together in a single, easy-to-share file.</p></article></div></section>
+  {% elif page == "contact" %}
+  <section class="contact-panel"><div><span class="section-kicker">WE'RE HERE TO HELP</span><h2>Send us a note</h2><p>Questions or feedback? Fill out the form and your email app will open a ready-to-send message. Please don't include sensitive information about a child.</p><form id="contact-form" class="contact-form"><label for="contact-name">Your name</label><input id="contact-name" name="name" autocomplete="name" required><label for="contact-email">Your email</label><input id="contact-email" name="email" type="email" autocomplete="email" required><label for="contact-subject">Subject</label><input id="contact-subject" name="subject" required><label for="contact-message">Message</label><textarea id="contact-message" name="message" rows="5" required></textarea><button class="button-link" type="submit">Prepare email <span aria-hidden="true">↗</span></button></form><a class="contact-email" href="mailto:poseidonhamk@gmail.com">poseidonhamk@gmail.com</a></div><div class="contact-aside"><span aria-hidden="true">✉</span><p>We aim to reply within 24-48 hours.</p></div></section>
+  <script>
+    document.querySelector("#contact-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      const details = new FormData(event.currentTarget);
+      const message = [
+        `From: ${details.get("name")} (${details.get("email")})`,
+        "",
+        details.get("message"),
+      ].join("\n");
+      window.location.href = `mailto:poseidonhamk@gmail.com?subject=${encodeURIComponent(details.get("subject"))}&body=${encodeURIComponent(message)}`;
+    });
+  </script>
+  {% elif page == "auth" %}
+  <section class="account-panel"><div class="account-icon" aria-hidden="true">▣</div><div><span class="section-kicker">YOUR BOOKSHELF</span><h2>Keep your stories close</h2><p>Account sign-in and cross-device book storage are not connected in this version. You can still create a story and download its PDF on this device.</p><a class="button-link" href="/">Create a story <span aria-hidden="true">→</span></a></div></section>
+  {% elif page == "about" %}
+  <section class="about-banner"><span aria-hidden="true">✦</span><p>Every child deserves to be the hero of their own adventure.</p></section>
+  <section class="info-grid">{% for section in sections %}<article class="info-card"><span class="section-kicker">0{{ forloop.counter }}</span><h2>{{ section.title }}</h2><p>{{ section.body }}</p></article>{% endfor %}</section>
+  <div class="center-action"><a class="button-link" href="/">Create your story <span aria-hidden="true">→</span></a></div>
+  {% else %}
+  <section class="legal-content">{% for section in sections %}<article><h2>{{ forloop.counter }}. {{ section.title }}</h2><p>{{ section.body }}</p></article>{% endfor %}<p>Questions about this page? <a href="/contact/">Contact us</a>.</p></section>
+  {% endif %}
+</main>
+{% endblock %}

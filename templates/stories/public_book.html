@@ -1,0 +1,25 @@
+{% extends "stories/base.html" %}
+{% load static %}
+{% block title %}{{ story.title }} | Poseidon's Story Book{% endblock %}
+{% block content %}
+<main class="page-shell public-book-shell">
+  <a class="back-link" href="/library/">← Story Library</a>
+  <header class="page-heading public-book-heading">
+    <span class="eyebrow">COMMUNITY STORYBOOK</span>
+    <h1>{{ story.title }}</h1>
+    <p>{{ story.get_reading_level_display }}</p>
+  </header>
+  <div class="public-book-actions"><a class="download-button" href="/api/stories/{{ story.id }}/download/" download>Download book (PDF)</a></div>
+  <section class="book-reader public-book-reader" aria-label="Storybook reader" data-book-data-id="public-book-pages">
+    <button type="button" class="reader-arrow" data-reader-previous aria-label="Previous page">←</button>
+    <article class="book-page-view">
+      <div class="book-illustration"><img data-reader-image alt="" hidden><span data-reader-placeholder aria-hidden="true">✦</span></div>
+      <div class="book-copy"><span data-reader-counter aria-live="polite"></span><p data-reader-text></p></div>
+    </article>
+    <button type="button" class="reader-arrow" data-reader-next aria-label="Next page">→</button>
+  </section>
+  {{ book_pages|json_script:"public-book-pages" }}
+  <p class="public-book-note">Shared by a community member. An adult should review AI-generated stories before sharing with children.</p>
+</main>
+<script src="{% static 'book_reader.js' %}?v=4"></script>
+{% endblock %}
