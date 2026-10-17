@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useState } from "react";
 import {
   createStory,
+  ART_STYLES,
   READING_LEVELS,
   Story,
   StoryFieldErrors,
@@ -14,6 +15,7 @@ const EMPTY_FORM: StoryFormInput = {
   favoriteTheme: "",
   readingLevel: "early-reader",
   moralLesson: "",
+  artStyle: "watercolor",
 };
 
 type Props = {
@@ -150,6 +152,18 @@ export function StoryForm({ onCreated }: Props) {
           placeholder="e.g. sharing is caring"
           className="input"
         />
+      </Field>
+
+      <Field label="Illustration style" error={fieldErrors.artStyle}>
+        <select
+          value={form.artStyle}
+          onChange={(e) => updateField("artStyle", e.target.value as StoryFormInput["artStyle"])}
+          className="input"
+        >
+          {ART_STYLES.map((style) => (
+            <option key={style.value} value={style.value}>{style.label}</option>
+          ))}
+        </select>
       </Field>
 
       <button

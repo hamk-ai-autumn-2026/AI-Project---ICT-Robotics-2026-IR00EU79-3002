@@ -227,6 +227,20 @@ a { color: inherit; }
 .contact-form textarea { min-height: 120px; }
 .contact-form .button-link { margin-top: 12px; }
 .contact-email { display: inline-block; margin-top: 6px; }
+.nav-logout { display: inline; margin: 0; }
+.nav-logout button { border: 0; padding: 0; background: none; color: #514b68; font: inherit; cursor: pointer; }
+.nav-user { color: #82778e; font-size: .82rem; }
+.extra-character-fields, .character-row, .report-panel { display: grid; gap: 10px; margin: 18px 0; padding: 18px; border: 1px solid #e7e0de; border-radius: 14px; background: #fffdf9; }
+.extra-character-fields legend, .character-row legend { padding: 0 6px; color: #514b68; font-weight: 800; }
+.character-row label, .report-panel label { display: grid; gap: 5px; color: #514b68; font-size: .88rem; font-weight: 700; }
+.character-row input, .character-row select, .report-panel select, .report-panel textarea, .account-form input { width: 100%; border: 1px solid #d8d1d6; border-radius: 8px; padding: 10px 12px; background: #fff; font: inherit; }
+.photo-consent { display: flex; gap: 10px; align-items: flex-start; color: #625f70; font-size: .88rem; line-height: 1.5; }
+.photo-consent input { margin-top: 4px; }
+.my-books-list { display: grid; gap: 14px; }
+.my-book-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; border: 1px solid #e7e0de; border-radius: 14px; background: #fffdf9; }
+.my-book-card h2 { margin: 6px 0; }
+.account-form { max-width: 520px; margin: 0 auto; }
+.account-form form p { display: grid; gap: 6px; margin: 16px 0; }
 .contact-aside { padding: 20px; border-radius: 12px; background: #f7ede8; text-align: center; }
 .contact-aside > span { color: #d9507b; font-size: 2.3rem; }
 .contact-aside p { margin: 6px 0 0; font-size: .85rem; }

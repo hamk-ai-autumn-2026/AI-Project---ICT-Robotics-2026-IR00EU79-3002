@@ -82,15 +82,23 @@ def _build_prompt(story, page_count: int):
         "art director. You always respond with a single valid JSON object and "
         "nothing else: no markdown, no code fences, no commentary."
     )
+    additional_characters = list(story.characters.all()) if hasattr(story, "characters") else []
+    cast = "\n".join(
+        f"- {character.name} ({character.gender}): {character.appearance or 'appearance not specified'}"
+        for character in additional_characters
+    ) or "None"
     user_prompt = f"""Write a personalized, wholesome children's storybook.
 
 Child's name: {story.child_name}
 Child's gender: {noun} (use the pronouns {subject}/{obj}/{possessive} consistently in the story text)
 Child's appearance (keep this consistent in every illustration prompt): {story.child_appearance}
+Other characters (include these as recurring supporting characters):
+{cast}
 Favorite theme/animal: {story.favorite_theme}
 Moral or lesson the story should teach: {story.moral_lesson}
 Reading level: {story.reading_level} ({level_guidance})
 Number of pages: {page_count}
+Illustration direction: follow the selected visual style consistently across every page. Do not add a conflicting art style to individual image prompts.
 
 Respond with ONLY a JSON object matching exactly this shape:
 {{
@@ -100,7 +108,7 @@ Respond with ONLY a JSON object matching exactly this shape:
       "page_number": 1,
       "summary": "<one sentence beat of what happens on this page>",
       "text": "<the full page text a child would read, matching the reading level, using the correct pronouns above>",
-      "image_prompt": "<a vivid illustration prompt for a single children's-book-style image capturing this page, always explicitly describing {story.child_name} as {noun} using their appearance details above, no on-image text or words>"
+      "image_prompt": "<a vivid illustration prompt for a single children's-book-style image capturing this page, explicitly describing every character shown using their appearance details above, no on-image text or words>"
     }}
   ]
 }}
@@ -144,7 +152,7 @@ def _to_generated_story(data: dict, expected_page_count: int) -> GeneratedStory:
 
 
 class MockTextProvider:
-    """Deterministic, offline story generator used for dev/tests."""
+    """Deterministic, offline story generator used for local development."""
 
     name = "mock"
 
@@ -152,24 +160,99 @@ class MockTextProvider:
         _, _, _, noun = GENDER_PRONOUNS.get(
             getattr(story, "child_gender", "unspecified"), GENDER_PRONOUNS["unspecified"]
         )
+        side_characters = list(story.characters.all()) if hasattr(story, "characters") else []
+        child = story.child_name
+        theme = story.favorite_theme
+        companion_names = [character.name for character in side_characters]
+        companions = " and ".join(companion_names)
+        group = f"{child} and {companions}" if companions else child
+        moral = story.moral_lesson.rstrip(".!? ")
+
+        # Each beat moves the same small adventure forward: discovery, a friend
+        # who needs help, clues, a setback, teamwork, and a safe return home.
+        beats = [
+            (
+                "A hidden path",
+                f"On a sunny morning, {child} found a golden path leading into the world of {theme}. "
+                + (f"{companions} came along, ready to explore. " if companions else "With a little backpack, they set off to explore. ")
+                + "At the end of the path, a young friend waved hello.",
+                "a golden path appears and a young friend waves from the far end",
+            ),
+            (
+                "A friend needs help",
+                f"The young friend had wandered away from home and could not find the way back. "
+                f"{group} promised to help before the sun went down.",
+                "the young friend explains the problem while the heroes listen kindly",
+            ),
+            (
+                "Three little clues",
+                f"The friend remembered three clues: a silver stream, a bent tree, and a hill shaped like a shell. "
+                f"{group} listened carefully and made a plan.",
+                "the group studies a simple map with a stream, bent tree, and shell-shaped hill",
+            ),
+            (
+                "A bridge together",
+                f"At the stream, the stepping stones were too far apart. {group} gathered sturdy branches and laid them across the narrowest part. "
+                "Everyone crossed safely, one at a time.",
+                "the friends build and cross a small safe bridge over a sparkling stream",
+            ),
+            (
+                "The trail gets mixed up",
+                f"A gust of wind scattered the trail markers. For a moment, everyone felt lost. "
+                f"{group} shared the map and took turns matching each clue.",
+                "a gentle breeze scatters leaves as the friends work together over a map",
+            ),
+            (
+                "A helpful discovery",
+                f"Near the bent tree, a family of {theme} friends recognized the last clue. They pointed toward the shell-shaped hill and wished the travelers luck.",
+                "friendly {theme} animals point toward a rounded hill beside an old bent tree",
+            ),
+            (
+                "Home at last",
+                f"Together, the friends followed the last trail over the hill. The young friend spotted home and ran to a family waiting in the meadow. "
+                f"Everyone cheered for {group}.",
+                "the young friend reunites with family in a sunny meadow",
+            ),
+            (
+                "A lesson to remember",
+                f"The friends shared a picnic beneath the trees. On the path home, {child} smiled and remembered that {moral}.",
+                "the friends share a picnic beneath the trees as the sun sets",
+            ),
+        ]
+
+        if page_count == 1:
+            selected_beats = [(
+                "A little adventure",
+                f"{group} followed a golden path into the world of {theme}, helped a lost young friend find the way home, and celebrated together. "
+                f"{child} learned that {moral}.",
+                "the friends guide a young animal safely home and celebrate together",
+            )]
+        else:
+            selected_beats = []
+            for index in range(page_count):
+                start = round(index * len(beats) / page_count)
+                end = round((index + 1) * len(beats) / page_count)
+                page_beats = beats[start:end]
+                selected_beats.append((
+                    "; ".join(beat[0] for beat in page_beats),
+                    " ".join(beat[1] for beat in page_beats),
+                    "; then ".join(beat[2] for beat in page_beats),
+                ))
+
+        character_details = [f"{character.name} ({character.appearance or character.gender})" for character in side_characters]
+        cast_description = "; ".join(character_details)
         pages = []
-        for page_number in range(1, page_count + 1):
-            pages.append(
-                GeneratedPage(
-                    page_number=page_number,
-                    summary=f"{story.child_name} has an adventure with {story.favorite_theme} (page {page_number}).",
-                    text=(
-                        f"{story.child_name} took another step into the world of {story.favorite_theme}. "
-                        f"Page {page_number} of {page_count}: a little more of the lesson '{story.moral_lesson}' "
-                        "became clear."
-                    ),
-                    image_prompt=(
-                        f"Children's book illustration of {story.child_name}, {noun}, ({story.child_appearance}) "
-                        f"surrounded by {story.favorite_theme}, warm colorful watercolor style, page {page_number}, "
-                        "no text or words in the image"
-                    ),
-                )
-            )
+        for page_number, (summary, text, action) in enumerate(selected_beats, start=1):
+            character_prompt = f", alongside {cast_description}" if cast_description else ""
+            pages.append(GeneratedPage(
+                page_number=page_number,
+                summary=summary,
+                text=text,
+                image_prompt=(
+                    f"Children's book illustration of {child}, {noun}, ({story.child_appearance})"
+                    f"{character_prompt}; {action}; keep the characters consistent; no text or words in the image"
+                ),
+            ))
         return GeneratedStory(title=f"{story.child_name} and the {story.favorite_theme.title()}", pages=pages)
 
 

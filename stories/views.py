@@ -1,45 +1,32 @@
 import hashlib
 import json
 import logging
+import os
 import re
 import secrets
-import threading
+from io import BytesIO
 
-from django.db import close_old_connections
+from django.conf import settings
+from django.contrib.auth import login
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.views import LoginView
+from django.core.files.base import ContentFile
+from django.db import IntegrityError, transaction
 from django.http import Http404, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import StoryForm
-from .models import Story
+from .models import Story, StoryCharacter, StoryReport
 from .services.pdf import PdfGenerationError, build_story_pdf
-from .services.pipeline import StoryGenerationError, generate_story_content
+from .tasks import generate_story_task
 
 logger = logging.getLogger(__name__)
 
-def _generate_story_in_background(story_id):
-    close_old_connections()
-    try:
-        story = Story.objects.get(pk=story_id)
-        generate_story_content(story)
-    except StoryGenerationError:
-        logger.info("Story generation finished with a handled error for story %s", story_id)
-    except Exception:
-        logger.exception("Unexpected story generation error for story %s", story_id)
-        Story.objects.filter(pk=story_id).update(
-            status="FAILED",
-            error_message="Story generation failed unexpectedly. Please try again.",
-        )
-    finally:
-        close_old_connections()
-
-
 def _start_story_generation(story_id):
-    threading.Thread(
-        target=_generate_story_in_background,
-        args=(story_id,),
-        daemon=True,
-    ).start()
+    return generate_story_task.delay(story_id)
 SITE_PAGES = {
     "library": {
         "title": "Story Library",
@@ -47,7 +34,7 @@ SITE_PAGES = {
     },
     "auth": {
         "title": "My Books",
-        "intro": "Your storybooks belong together. Account sign-in is not connected in this version yet.",
+        "intro": "Sign in to see your private books, or create a free account to keep them together.",
     },
     "pricing": {
         "title": "Simple Pricing",
@@ -79,13 +66,13 @@ SITE_SECTIONS = {
     "about": [
         {"title": "The idea", "body": "This project uses creative technology to help families make personalized stories featuring the people, places, and interests a child loves."},
         {"title": "Our mission", "body": "Encourage imagination, make reading feel personal, and give families a simple way to save a one-of-a-kind adventure."},
-        {"title": "Made with care", "body": "Story generation uses configurable text and illustration providers. Local development uses offline mock providers so the experience can be tested without external API keys."},
+        {"title": "Made with care", "body": "Story generation uses configurable text and illustration providers. Local mock generation needs no AI credentials; reference photos are enabled only for fal.ai image generation with explicit guardian consent."},
     ],
     "privacy": [
         {"title": "Information you provide", "body": "Story details entered into the form are stored by this application so it can generate and display the requested book. Do not submit sensitive personal information."},
         {"title": "Children's privacy", "body": "The service is intended for parents, guardians, and educators. Adults should submit only information they are comfortable using to create a story and should supervise children's use."},
-        {"title": "Service providers", "body": "When external text or image providers are configured, story prompts are sent to those providers to generate content. The local mock providers do not send data over the network."},
-        {"title": "Retention and contact", "body": "Stories remain in the configured application database until an administrator removes them. Contact the site owner to ask about access or deletion."},
+        {"title": "Service providers and reference photos", "body": "When an external text or image provider is configured, story prompts and any consented reference photo may be sent to that provider to generate content. Reference photos are stored privately by this app and removed after successful generation; provider retention is governed by that provider's policies. The mock text provider is local; the mock image provider returns a placeholder URL."},
+        {"title": "Retention and contact", "body": "Stories remain in the configured application database until their owner or an administrator removes them. Failed generations may retain a consented reference photo so the owner can retry. Contact the site owner to ask about access or deletion."},
     ],
     "terms": [
         {"title": "Who may use the service", "body": "Adults should create and review stories for children. You are responsible for the information you submit and for supervising how generated content is used."},
@@ -106,13 +93,20 @@ def _story_payload(story):
         "id": story.id,
         "childName": story.child_name,
         "childGender": story.child_gender,
+        "characters": [
+            {"name": character.name, "appearance": character.appearance, "gender": character.gender}
+            for character in story.characters.all()
+        ],
         "childAppearance": story.child_appearance,
         "favoriteTheme": story.favorite_theme,
         "readingLevel": story.reading_level,
         "moralLesson": story.moral_lesson,
+        "artStyle": story.art_style,
+        "hasReferencePhoto": bool(story.reference_photo),
         "title": story.title or None,
         "status": story.status,
         "isPublic": story.is_public,
+        "moderationStatus": story.moderation_status,
         "errorMessage": story.error_message or None,
         "createdAt": story.created_at.isoformat(),
         "updatedAt": story.updated_at.isoformat(),
@@ -136,7 +130,9 @@ def _story_payload(story):
 
 
 def _has_story_access(request, story):
-    if story.is_public:
+    if story.is_public and story.moderation_status != "REJECTED":
+        return True
+    if request.user.is_authenticated and story.owner_id == request.user.id:
         return True
     supplied_token = request.headers.get("X-Story-Token", "")
     if not supplied_token or not story.publish_token_hash:
@@ -145,13 +141,27 @@ def _has_story_access(request, story):
     return secrets.compare_digest(story.publish_token_hash, supplied_hash)
 
 
+def _has_owner_control(request, story):
+    if request.user.is_authenticated and story.owner_id == request.user.id:
+        return True
+    supplied_token = request.headers.get("X-Story-Token", "")
+    supplied_hash = hashlib.sha256(supplied_token.encode()).hexdigest()
+    return bool(story.publish_token_hash and secrets.compare_digest(story.publish_token_hash, supplied_hash))
+
+
 @require_GET
 def health(request):
     return JsonResponse({"status": "ok", "db": "ok"})
 
 
 def story_form(request):
-    return render(request, "stories/story_form.html", {"form": StoryForm()})
+    return render(request, "stories/story_form.html", {
+        "form": StoryForm(),
+        "reference_photo_enabled": (
+            os.environ.get("IMAGE_PROVIDER", "mock").lower() == "fal"
+            and bool(os.environ.get("FAL_KEY"))
+        ),
+    })
 
 
 def site_page(request, page):
@@ -164,9 +174,9 @@ def site_page(request, page):
         "sections": SITE_SECTIONS.get(page, []),
     }
     if page == "library":
-        books = Story.objects.filter(is_public=True, status="COMPLETE").prefetch_related(
-            "pages", "pages__asset"
-        ).order_by("-created_at")
+        books = Story.objects.filter(is_public=True, status="COMPLETE").exclude(
+            moderation_status="REJECTED"
+        ).prefetch_related("pages", "pages__asset").order_by("-created_at")
         context["books"] = [
             {
                 "id": book.id,
@@ -189,12 +199,18 @@ def site_page(request, page):
 
 @require_GET
 def public_story_book(request, story_id):
-    story = get_object_or_404(
-        Story.objects.filter(is_public=True, status="COMPLETE").prefetch_related(
-            "pages", "pages__asset"
-        ),
-        pk=story_id,
+    story = (
+        Story.objects.filter(
+            is_public=True,
+            status="COMPLETE",
+        )
+        .exclude(moderation_status="REJECTED")
+        .prefetch_related("pages", "pages__asset")
+        .filter(pk=story_id)
+        .first()
     )
+    if story is None:
+        return render(request, "stories/public_book_unavailable.html", status=404)
     book_pages = [
         {
             "pageNumber": page.page_number,
@@ -227,6 +243,7 @@ def create_story(request):
         "favorite_theme": data.get("favorite_theme", data.get("favoriteTheme")),
         "reading_level": data.get("reading_level", data.get("readingLevel")),
         "moral_lesson": data.get("moral_lesson", data.get("moralLesson")),
+        "art_style": data.get("art_style", data.get("artStyle", "watercolor")),
     }
     form = StoryForm(normalized_data)
     if not form.is_valid():
@@ -234,7 +251,25 @@ def create_story(request):
             {"error": "Invalid story details", "fields": form.errors.get_json_data()},
             status=400,
         )
-    story = form.save()
+    story = form.save(commit=False)
+    if request.user.is_authenticated:
+        story.owner = request.user
+    story.save()
+    raw_characters = data.get("characters", [])
+    if not isinstance(raw_characters, list) or len(raw_characters) > 3:
+        story.delete()
+        return JsonResponse({"error": "Add no more than three supporting characters."}, status=400)
+    for item in raw_characters:
+        if not isinstance(item, dict):
+            story.delete()
+            return JsonResponse({"error": "Each supporting character must be an object."}, status=400)
+        name = str(item.get("name", "")).strip()
+        appearance = str(item.get("appearance", "")).strip()
+        gender = str(item.get("gender", "unspecified"))
+        if not name or len(name) > 80 or len(appearance) > 500 or gender not in dict(Story.GENDER_CHOICES):
+            story.delete()
+            return JsonResponse({"error": "Check each supporting character's name, appearance, and gender."}, status=400)
+        StoryCharacter.objects.create(story=story, name=name, appearance=appearance, gender=gender)
     publish_token = secrets.token_urlsafe(32)
     story.publish_token_hash = hashlib.sha256(publish_token.encode()).hexdigest()
     story.save(update_fields=["publish_token_hash"])
@@ -258,11 +293,39 @@ def generate_story(request, story_id):
     story = get_object_or_404(Story, pk=story_id)
     if not _has_story_access(request, story) or story.is_public:
         raise Http404
-    if story.status != "GENERATING":
-        story.status = "GENERATING"
+    if story.status not in {"QUEUED", "GENERATING"}:
+        story.status = "QUEUED"
         story.error_message = ""
         story.save(update_fields=["status", "error_message", "updated_at"])
+        try:
+            _start_story_generation(story.id)
+        except Exception as exc:
+            logger.exception("Could not queue story generation for %s", story.id)
+            story.status = "FAILED"
+            story.error_message = "Generation could not be queued. Please try again shortly."
+            story.save(update_fields=["status", "error_message", "updated_at"])
+            return JsonResponse({"error": story.error_message, "story": _story_payload(story)}, status=503)
+    return JsonResponse({"story": _story_payload(story)}, status=202)
+
+
+@require_POST
+def retry_story_generation(request, story_id):
+    story = get_object_or_404(Story, pk=story_id)
+    if not _has_story_access(request, story) or story.is_public:
+        raise Http404
+    if story.status != "FAILED":
+        return JsonResponse({"error": "Only failed stories can be retried."}, status=409)
+    story.status = "QUEUED"
+    story.error_message = ""
+    story.save(update_fields=["status", "error_message", "updated_at"])
+    try:
         _start_story_generation(story.id)
+    except Exception:
+        logger.exception("Could not queue retry for story %s", story.id)
+        story.status = "FAILED"
+        story.error_message = "Retry could not be queued. Please try again shortly."
+        story.save(update_fields=["status", "error_message", "updated_at"])
+        return JsonResponse({"error": story.error_message}, status=503)
     return JsonResponse({"story": _story_payload(story)}, status=202)
 
 
@@ -277,18 +340,26 @@ def publish_story(request, story_id):
     if not isinstance(is_public, bool):
         return JsonResponse({"error": "isPublic must be true or false"}, status=400)
 
-    supplied_token = request.headers.get("X-Story-Token", "")
-    supplied_hash = hashlib.sha256(supplied_token.encode()).hexdigest()
-    if not story.publish_token_hash or not secrets.compare_digest(
-        story.publish_token_hash, supplied_hash
-    ):
+    if not _has_owner_control(request, story):
         return JsonResponse({"error": "You cannot change this story's library visibility"}, status=403)
     if is_public and story.status != "COMPLETE":
         return JsonResponse({"error": "Only completed stories can be added to the library"}, status=409)
 
     story.is_public = is_public
-    story.save(update_fields=["is_public", "updated_at"])
+    # Sharing is explicit in the reader, so a completed book becomes public
+    # immediately after the creator confirms. Staff can still remove a book.
+    story.moderation_status = "APPROVED"
+    story.save(update_fields=["is_public", "moderation_status", "updated_at"])
     return JsonResponse({"story": _story_payload(story)})
+
+
+@require_POST
+def delete_story(request, story_id):
+    story = get_object_or_404(Story, pk=story_id)
+    if not _has_owner_control(request, story):
+        raise Http404
+    story.delete()
+    return HttpResponse(status=204)
 
 
 @require_GET
@@ -308,3 +379,86 @@ def download_story_pdf(request, story_id):
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+@require_GET
+@login_required
+def my_books(request):
+    stories = Story.objects.filter(owner=request.user).order_by("-updated_at")
+    return render(request, "stories/my_books.html", {"stories": stories})
+
+
+def sign_up(request):
+    if request.user.is_authenticated:
+        return redirect("my-books-list")
+    form = UserCreationForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        user = form.save()
+        login(request, user)
+        return redirect("my-books-list")
+    return render(request, "registration/signup.html", {"form": form})
+
+
+@require_POST
+def upload_reference_photo(request, story_id):
+    story = get_object_or_404(Story, pk=story_id)
+    if not _has_story_access(request, story) or story.is_public:
+        raise Http404
+    photo = request.FILES.get("photo")
+    if not photo:
+        return JsonResponse({"error": "Choose a photo first."}, status=400)
+    if not request.POST.get("consent") == "true":
+        return JsonResponse({"error": "Photo and provider-processing consent is required."}, status=400)
+    if os.environ.get("IMAGE_PROVIDER", "mock").lower() != "fal" or not os.environ.get("FAL_KEY"):
+        return JsonResponse({"error": "Photo references require IMAGE_PROVIDER=fal and a configured fal.ai key."}, status=409)
+    if photo.size > settings.MAX_REFERENCE_PHOTO_BYTES:
+        return JsonResponse({"error": "Photos must be 8 MB or smaller."}, status=400)
+    if photo.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+        return JsonResponse({"error": "Upload a JPEG, PNG, or WebP image."}, status=400)
+    try:
+        from PIL import Image, UnidentifiedImageError
+
+        image = Image.open(photo)
+        image.verify()
+        photo.seek(0)
+        with Image.open(photo) as image:
+            if image.width * image.height > 25_000_000:
+                return JsonResponse({"error": "Photos must be 25 megapixels or smaller."}, status=400)
+            image.thumbnail((2048, 2048))
+            cleaned_photo = BytesIO()
+            image.convert("RGB").save(cleaned_photo, format="JPEG", quality=90, optimize=True)
+            photo_bytes = cleaned_photo.getvalue()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+        return JsonResponse({"error": "The uploaded file is not a valid supported image."}, status=400)
+    if story.reference_photo:
+        story.reference_photo.delete(save=False)
+    story.reference_photo.save("reference.jpg", ContentFile(photo_bytes), save=False)
+    story.reference_photo_consent = True
+    story.photo_consent_at = timezone.now()
+    story.save(update_fields=["reference_photo", "reference_photo_consent", "photo_consent_at", "updated_at"])
+    return JsonResponse({"hasReferencePhoto": True}, status=201)
+
+
+@require_POST
+def report_story(request, story_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Sign in to report a story."}, status=401)
+    story = get_object_or_404(
+        Story.objects.exclude(moderation_status="REJECTED"),
+        pk=story_id,
+        is_public=True,
+    )
+    try:
+        data = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Request body must be valid JSON."}, status=400)
+    reason = data.get("reason")
+    details = str(data.get("details", "")).strip()
+    if reason not in dict(StoryReport.REASONS) or len(details) > 1000:
+        return JsonResponse({"error": "Choose a report reason and keep details under 1000 characters."}, status=400)
+    try:
+        with transaction.atomic():
+            StoryReport.objects.create(story=story, reporter=request.user, reason=reason, details=details)
+    except IntegrityError:
+        return JsonResponse({"error": "You have already reported this story."}, status=409)
+    return JsonResponse({"message": "Thank you. The library team will review this story."}, status=201)

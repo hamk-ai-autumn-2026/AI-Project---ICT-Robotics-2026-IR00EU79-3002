@@ -20,6 +20,8 @@
   </section>
   {{ book_pages|json_script:"public-book-pages" }}
   <p class="public-book-note">Shared by a community member. An adult should review AI-generated stories before sharing with children.</p>
+  <section class="report-panel"><h2>See a problem with this story?</h2>{% if user.is_authenticated %}<label for="public-report-reason">Reason</label><select id="public-report-reason"><option value="inappropriate">Inappropriate content</option><option value="personal_info">Personal information</option><option value="copyright">Copyright concern</option><option value="other">Other concern</option></select><label for="public-report-details">Details (optional)</label><textarea id="public-report-details" maxlength="1000" rows="2"></textarea><button type="button" class="text-button" id="public-report-button" data-story-id="{{ story.id }}">Send report</button><p id="public-report-status" role="status" aria-live="polite"></p><form hidden id="report-csrf-form">{% csrf_token %}</form>{% else %}<a href="/accounts/login/?next={{ request.path|urlencode }}">Sign in to report a story</a>{% endif %}</section>
 </main>
 <script src="{% static 'book_reader.js' %}?v=4"></script>
+<script src="{% static 'public_report.js' %}?v=1"></script>
 {% endblock %}

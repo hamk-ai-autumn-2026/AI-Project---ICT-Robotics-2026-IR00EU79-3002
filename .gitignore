@@ -5,6 +5,8 @@ dist
 !.env.example
 !**/.env.example
 *.sqlite3
+private_media/
+staticfiles/
 *.log
 .DS_Store
 __pycache__/

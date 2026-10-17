@@ -1,12 +1,12 @@
-{% extends "stories/base.html" %}
+﻿{% extends "stories/base.html" %}
 {% load static %}
 {% block title %}Create a Story | Poseidon's Story Book{% endblock %}
 {% block content %}
     <main class="shell">
       <section class="hero">
-        <span class="eyebrow">✨ Personalized AI Storybook ✨</span>
+        <span class="eyebrow">Personalized AI Storybook</span>
         <h1>A little story, made just for them.</h1>
-        <p>Tell us about a child and we'll paint a magical storybook they can call their very own — ready to read or download as an eBook.</p>
+        <p>Tell us about a child and we'll paint a magical storybook they can call their very own - ready to read or download as an eBook.</p>
       </section>
       <section class="card">
         <form id="story-form" novalidate>
@@ -16,10 +16,14 @@
           <label class="field" for="{{ field.id_for_label }}">
             <span>{{ field.label }}</span>
             {% if field.name == "child_appearance" %}<small>Used to keep illustrations consistent.</small>{% endif %}
+            {% if field.name == "art_style" %}<small>Choose the look used throughout the storybook.</small>{% endif %}
             {{ field }}
             <strong class="field-error" data-error="{{ field.name }}"></strong>
           </label>
           {% endfor %}
+          <fieldset class="extra-character-fields"><legend>Supporting characters (optional)</legend><p>Add up to three friends or family members to the adventure.</p><div id="extra-characters"></div><button type="button" class="secondary" id="add-character-button">Add a character</button></fieldset>
+          <label class="field" for="reference-photo"><span>Reference photo (optional)</span><small>{% if reference_photo_enabled %}JPEG, PNG, or WebP, up to 8 MB. Stored privately and removed by this app after successful generation.{% else %}Configure IMAGE_PROVIDER=fal and a fal.ai key to enable photo references.{% endif %}</small><input id="reference-photo" type="file" accept="image/jpeg,image/png,image/webp" {% if not reference_photo_enabled %}disabled{% endif %}></label>
+          <label class="photo-consent"><input id="photo-consent" type="checkbox" {% if not reference_photo_enabled %}disabled{% endif %}> I am the child's parent or guardian and consent to sending this photo to fal.ai to guide the illustrations. Provider privacy and retention rules apply.</label>
           <button type="submit" id="submit-button">Create storybook</button>
         </form>
         <div id="success" class="success" hidden>
@@ -30,6 +34,8 @@
             <span class="spinner"></span> Writing the story and painting the pictures...
           </div>
           <button type="button" class="secondary" id="reset-button">Create another story</button>
+          <button type="button" class="button-link" id="retry-generation-button-empty" hidden>Retry failed generation</button>
+          <button type="button" class="text-button" id="delete-story-button-empty" hidden>Delete this story</button>
         </div>
       </section>
       <section id="storybook" class="storybook" hidden>
@@ -38,9 +44,11 @@
           <p class="reader-byline" id="reader-byline"></p>
           <p class="reader-progress" id="reader-progress" aria-live="polite"></p>
           <p class="reader-generation-status" id="reader-generation-status" role="status" aria-live="polite"></p>
+          <button type="button" class="button-link" id="retry-generation-button" hidden>Retry failed generation</button>
           <div class="reader-actions">
             <a id="download-link" class="download-button" href="#" download>Download book (PDF)</a>
             <button type="button" class="secondary reader-new-book" id="new-book-button">Create another</button>
+            <button type="button" class="text-button" id="delete-story-button">Delete this story</button>
           </div>
           <p id="download-status" class="download-status" role="status" aria-live="polite"></p>
         </div>
@@ -52,11 +60,12 @@
           </article>
           <button type="button" class="reader-arrow" data-reader-next aria-label="Next page">→</button>
         </section>
+        <section class="report-panel" id="report-panel" aria-label="Report this story"><h3>See a problem with this story?</h3>{% if user.is_authenticated %}<label for="report-reason">Reason</label><select id="report-reason"><option value="inappropriate">Inappropriate content</option><option value="personal_info">Personal information</option><option value="copyright">Copyright concern</option><option value="other">Other concern</option></select><label for="report-details">Details (optional)</label><textarea id="report-details" maxlength="1000" rows="2"></textarea><button type="button" class="text-button" id="report-button">Send report</button>{% else %}<a href="/accounts/login/">Sign in to report a story</a>{% endif %}<p id="report-status" role="status" aria-live="polite"></p></section>
         <div class="reader-tools">
           <button type="button" class="text-button" id="toggle-pages" aria-expanded="false">View all pages</button>
         </div>
         <section class="publish-panel" aria-labelledby="publish-heading">
-          <div><span class="section-kicker">SHARE YOUR STORY</span><h3 id="publish-heading">Add it to the community library?</h3><p>The title, story text, and illustrations will be visible to anyone. The story may include the child's name. You can remove it from this page later.</p></div>
+          <div><span class="section-kicker">SHARE YOUR STORY</span><h3 id="publish-heading">Add it to the community library?</h3><p>After you confirm, the title, story text, and illustrations will be visible to anyone. The book may include the child's name. You can remove it from the library here.</p></div>
           <label id="publish-consent-label" class="publish-consent"><input id="publish-consent" type="checkbox"> I want to share this story publicly.</label>
           <button type="button" class="button-link" id="publish-button" disabled>Add to community library</button>
           <p id="publish-status" role="status" aria-live="polite"></p>
@@ -72,8 +81,8 @@
       </section>
       <section class="content-section age-section"><header class="section-heading"><span class="section-kicker">GROWING WITH EVERY READER</span><h2>Choose a reading level</h2><p>Story language and length adapt to the age range you choose.</p></header><div class="age-grid"><article><span>AGES 0–2</span><h3>Toddlers</h3><p>Very simple words and just a few words per page.</p></article><article><span>AGES 3–5</span><h3>Beginner</h3><p>Short, gentle stories with simple words.</p></article><article><span>AGES 6–9</span><h3>Early reader</h3><p>Easy vocabulary and exciting discoveries.</p></article><article><span>AGES 10+</span><h3>Confident reader</h3><p>Richer details and a little more story to explore.</p></article></div></section>
       <section class="community-band"><div><span class="section-kicker">FROM OUR COMMUNITY</span><h2>Stories are better shared</h2><p>Visit the library to discover what's on the shelf.</p></div><a class="button-link button-light" href="/library/">Browse the library <span aria-hidden="true">→</span></a></section>
-      <section class="content-section faq-section"><header class="section-heading"><span class="section-kicker">GOOD TO KNOW</span><h2>Frequently asked questions</h2></header><div class="faq-grid"><details><summary>How long does it take?</summary><p>Generation time depends on the text and illustration providers configured for this app.</p></details><details><summary>Can I save or print the story?</summary><p>Yes. Once a story finishes generating, use the PDF download button to keep or print it.</p></details><details><summary>Are stories suitable for children?</summary><p>Stories are designed for young readers, but an adult should review generated content before sharing.</p></details><details><summary>Can I include more than one child?</summary><p>This version creates a story around one main character at a time.</p></details><details><summary>Can I add a reference photo?</summary><p>Photo uploads are not enabled in this version. Add a written appearance description to guide illustrations.</p></details><details><summary>Is story creation free?</summary><p>There is no checkout in this version. Create a story and download the completed PDF from the app.</p></details></div></section>
+      <section class="content-section faq-section"><header class="section-heading"><span class="section-kicker">GOOD TO KNOW</span><h2>Frequently asked questions</h2></header><div class="faq-grid"><details><summary>How long does it take?</summary><p>Generation time depends on the text and illustration providers configured for this app.</p></details><details><summary>Can I save or print the story?</summary><p>Yes. Once a story finishes generating, use the PDF download button to keep or print it.</p></details><details><summary>Are stories suitable for children?</summary><p>Stories are designed for young readers, but an adult should review generated content before sharing.</p></details><details><summary>Can I include more than one child?</summary><p>Add up to three supporting characters alongside the main child.</p></details><details><summary>Can I add a reference photo?</summary><p>Optional photo references require fal.ai image generation and parent or guardian consent. Photos are stored privately here and sent to fal.ai only for generation.</p></details><details><summary>Is story creation free?</summary><p>There is no checkout in this version. Create a story and download the completed PDF from the app.</p></details></div></section>
     </section>
     <script src="{% static 'book_reader.js' %}?v=4"></script>
-    <script src="{% static 'stories.js' %}?v=4"></script>
+    <script src="{% static 'stories.js' %}?v=6"></script>
 {% endblock %}

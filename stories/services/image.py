@@ -24,6 +24,19 @@ import requests
 
 FAL_BASE_URL = "https://fal.run"
 
+ART_STYLE_GUIDANCE = {
+    "watercolor": "warm watercolor children's-book illustration, soft washes and gentle colors",
+    "pencil": "hand-drawn pencil illustration, visible graphite lines, delicate cross-hatching, softly colored details",
+    "anime": "semi-realistic anime illustration, expressive faces, cinematic light, richly painted backgrounds, original character design",
+    "3d-animation": "polished 3D animated family-film illustration, appealing expressive characters, tactile materials, cinematic soft lighting",
+}
+
+
+def apply_art_style(prompt: str, art_style: str) -> str:
+    """Add the selected visual direction to every generated image prompt."""
+    guidance = ART_STYLE_GUIDANCE.get(art_style, ART_STYLE_GUIDANCE["watercolor"])
+    return f"{prompt.rstrip('. ')}. Visual style: {guidance}. Keep the same style across the storybook."
+
 
 class ImageGenerationError(Exception):
     """Raised when an image provider cannot produce an image."""
@@ -34,7 +47,7 @@ class MockImageProvider:
 
     name = "mock"
 
-    def generate_image(self, prompt: str) -> dict:
+    def generate_image(self, prompt: str, reference_photo: str | None = None) -> dict:
         digest = abs(hash(prompt)) % 1000
         return {
             "url": f"https://picsum.photos/seed/storybook-{digest}/1024/1024",
@@ -52,21 +65,33 @@ class FalImageProvider:
         self.model = os.environ.get("FAL_MODEL", "fal-ai/flux/schnell")
         self.timeout = float(os.environ.get("FAL_TIMEOUT_SECONDS", "60"))
         self.image_size = os.environ.get("FAL_IMAGE_SIZE", "square_hd")
+        self.reference_model = os.environ.get("FAL_REFERENCE_MODEL", "fal-ai/flux-pro/kontext")
+        self._reference_url = None
 
-    def generate_image(self, prompt: str) -> dict:
+    def generate_image(self, prompt: str, reference_photo: str | None = None) -> dict:
         if not self.api_key:
             raise ImageGenerationError("FAL_KEY is not set")
 
+        model = self.reference_model if reference_photo else self.model
         payload = {"prompt": prompt}
         # Only flux-family models expose `image_size`; other models (Seedream,
         # Nano Banana Pro) use different sizing params with sane defaults, so
         # we only set it for models known to accept it.
-        if "flux" in self.model:
+        if "flux" in model and not reference_photo:
             payload["image_size"] = self.image_size
+        if reference_photo:
+            try:
+                import fal_client
+
+                if not self._reference_url:
+                    self._reference_url = fal_client.upload_file(reference_photo)
+                payload["image_url"] = self._reference_url
+            except Exception as exc:
+                raise ImageGenerationError(f"fal.ai reference photo upload failed: {exc}") from exc
 
         try:
             response = requests.post(
-                f"{FAL_BASE_URL}/{self.model}",
+                f"{FAL_BASE_URL}/{model}",
                 headers={
                     "Authorization": f"Key {self.api_key}",
                     "Content-Type": "application/json",
@@ -82,7 +107,7 @@ class FalImageProvider:
         images = body.get("images") or []
         if not images or not images[0].get("url"):
             raise ImageGenerationError(f"Unexpected fal.ai response shape: {body}")
-        return {"url": images[0]["url"], "provider": f"fal:{self.model}"}
+        return {"url": images[0]["url"], "provider": f"fal:{model}"}
 
 
 def get_image_provider():

@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+node_modules
+frontend/node_modules
+backend/node_modules
+staticfiles
+private_media
+db.sqlite3
+.env
+__pycache__
+*.pyc

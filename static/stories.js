@@ -16,6 +16,15 @@
   const downloadStatus = document.querySelector("#download-status");
   const publishConsentLabel = document.querySelector("#publish-consent-label");
   const readerGenerationStatus = document.querySelector("#reader-generation-status");
+  const retryButton = document.querySelector("#retry-generation-button");
+  const retryEmptyButton = document.querySelector("#retry-generation-button-empty");
+  const extraCharacters = document.querySelector("#extra-characters");
+  const addCharacterButton = document.querySelector("#add-character-button");
+  const referencePhoto = document.querySelector("#reference-photo");
+  const photoConsent = document.querySelector("#photo-consent");
+  const reportPanel = document.querySelector("#report-panel");
+  const deleteStoryButton = document.querySelector("#delete-story-button");
+  const deleteStoryEmptyButton = document.querySelector("#delete-story-button-empty");
   let currentStory = null;
   let publishToken = "";
   let isPublic = false;
@@ -53,11 +62,16 @@
         : "Writing your story. Pages will appear here as soon as the story is ready.";
       readerGenerationStatus.hidden = false;
     }
+    retryButton.hidden = story.status !== "FAILED";
+    retryEmptyButton.hidden = story.status !== "FAILED";
+    reportPanel.hidden = !story.isPublic || story.moderationStatus === "REJECTED";
 
     if (pages.length === 0) {
+      deleteStoryEmptyButton.hidden = false;
       storybook.hidden = true;
       return;
     }
+    deleteStoryEmptyButton.hidden = true;
 
     const downloadLink = document.querySelector("#download-link");
     downloadLink.href = "#";
@@ -109,10 +123,15 @@
     }
     publishConsent.disabled = story.status !== "COMPLETE";
     publishConsentLabel.hidden = isPublic;
-    publishButton.textContent = isPublic ? "Remove from community library" : "Add to community library";
+    publishButton.textContent = isPublic
+      ? "Remove from community library"
+      : (publishConsent.checked ? "Confirm addition to community library" : "Add to community library");
     publishButton.disabled = story.status !== "COMPLETE" || (!isPublic && !publishConsent.checked);
     publicBookLink.href = `/library/${story.id}/`;
-    publicBookLink.hidden = !isPublic;
+    publicBookLink.hidden = !isPublic || story.status !== "COMPLETE" || story.moderationStatus === "REJECTED";
+    if (isPublic) {
+      publishStatus.textContent = "Your book is shared in the community library.";
+    }
     success.hidden = true;
     storybook.hidden = false;
     if (isNewStory) {
@@ -130,6 +149,10 @@
   async function updateLibraryVisibility() {
     if (!currentStory || !publishToken) return;
     const nextVisibility = !isPublic;
+    const confirmation = nextVisibility
+      ? "Confirm adding this book to the community library? Its title, story, illustrations, and the child's name will become public immediately."
+      : "Remove this book from the community library?";
+    if (!window.confirm(confirmation)) return;
     publishButton.disabled = true;
     publishStatus.textContent = nextVisibility ? "Adding your book..." : "Removing your book...";
     try {
@@ -146,14 +169,14 @@
       if (!response.ok) throw new Error(body.error || "Could not update library visibility");
       isPublic = body.story.isPublic;
       publishStatus.textContent = isPublic
-        ? "Your book is now in the community library."
+        ? "Your book is now visible in the community library."
         : "Your book has been removed from the community library.";
       publishButton.textContent = isPublic ? "Remove from community library" : "Add to community library";
       publishConsentLabel.hidden = isPublic;
       publishConsent.checked = false;
       publishButton.disabled = !isPublic;
       publicBookLink.href = `/library/${currentStory.id}/`;
-      publicBookLink.hidden = !isPublic;
+      publicBookLink.hidden = !isPublic || body.story.status !== "COMPLETE" || body.story.moderationStatus === "REJECTED";
     } catch (error) {
       publishStatus.textContent = error instanceof Error ? error.message : "Could not update library visibility";
       publishButton.disabled = isPublic ? false : !publishConsent.checked;
@@ -169,6 +192,11 @@
       if (!response.ok) throw new Error(body.error || "Could not check story progress");
       const story = body.story;
       renderStorybook(story);
+      if (!story.pages || !story.pages.length) {
+        document.querySelector("#success-copy").textContent = story.status === "FAILED"
+          ? (story.errorMessage || "Generation stopped. Retry when you're ready.")
+          : `Story status: ${story.status.toLowerCase()}. This page will update automatically.`;
+      }
       if (story.status === "COMPLETE") return;
       if (story.status === "FAILED") {
         if (!story.pages.length) {
@@ -191,8 +219,14 @@
       });
       const body = await response.json();
       if (!response.ok) {
+        if (body.story) {
+          renderStorybook(body.story);
+          success.hidden = false;
+          document.querySelector("#success-title").textContent = "Generation could not start";
+          document.querySelector("#success-copy").textContent = body.error || "Please retry when the worker is available.";
+        }
         errorBox.textContent =
-          (body.story && body.story.errorMessage) || body.detail || "Could not generate the storybook";
+          (body.story && body.story.errorMessage) || body.error || body.detail || "Could not generate the storybook";
         errorBox.hidden = false;
         return;
       }
@@ -215,8 +249,24 @@
     clearErrors();
     button.disabled = true;
     button.textContent = "Saving...";
+    const selectedPhoto = referencePhoto.files[0];
+    if (selectedPhoto && !photoConsent.checked) {
+      errorBox.textContent = "Confirm parent or guardian consent before using a reference photo.";
+      errorBox.hidden = false;
+      button.disabled = false;
+      button.textContent = "Create storybook";
+      return;
+    }
     const payload = Object.fromEntries(new FormData(form).entries());
     delete payload.csrfmiddlewaretoken;
+    payload.characters = Array.from(extraCharacters.querySelectorAll(".character-row"))
+      .map((row) => ({
+        name: row.querySelector("[data-character-name]").value.trim(),
+        appearance: row.querySelector("[data-character-appearance]").value.trim(),
+        gender: row.querySelector("[data-character-gender]").value,
+      })).filter((character) => character.name);
+    delete payload.reference_photo;
+    delete payload.consent;
     try {
       const response = await fetch("/api/stories/", {
         method: "POST",
@@ -235,6 +285,25 @@
       }
       form.hidden = true;
       publishToken = body.publishToken;
+      sessionStorage.setItem(`storybook-token-${body.story.id}`, publishToken);
+      window.history.replaceState(null, "", `/?story=${body.story.id}`);
+      if (selectedPhoto) {
+        const photoData = new FormData();
+        photoData.append("photo", selectedPhoto);
+        photoData.append("consent", "true");
+        try {
+          const photoResponse = await fetch(`/api/stories/${body.story.id}/reference-photo/`, {
+            method: "POST",
+            headers: { "X-CSRFToken": csrfToken(), "X-Story-Token": publishToken },
+            body: photoData,
+          });
+          const photoResult = await photoResponse.json();
+          if (!photoResponse.ok) throw new Error(photoResult.error || "The photo could not be used.");
+        } catch (photoError) {
+          errorBox.textContent = `${photoError instanceof Error ? photoError.message : "The photo could not be used."} Continuing without it.`;
+          errorBox.hidden = false;
+        }
+      }
       const generationRequest = ++activeGenerationRequest;
       document.querySelector("#success-copy").textContent =
         `"${body.story.childName}"'s storybook is being created...`;
@@ -249,9 +318,50 @@
     }
   });
 
+  addCharacterButton.addEventListener("click", function () {
+    const rows = extraCharacters.querySelectorAll(".character-row");
+    if (rows.length >= 3) return;
+    const row = document.createElement("fieldset");
+    row.className = "character-row";
+    row.innerHTML = '<legend>Supporting character</legend><label>Name<input data-character-name maxlength="80" required></label><label>Appearance<input data-character-appearance maxlength="500" placeholder="e.g. fluffy orange fur"></label><label>Gender<select data-character-gender><option value="unspecified">Prefer not to say</option><option value="girl">Girl</option><option value="boy">Boy</option><option value="nonbinary">Non-binary / other</option></select></label><button type="button" class="text-button" data-remove-character>Remove</button>';
+    row.querySelector("[data-remove-character]").addEventListener("click", () => {
+      row.remove();
+      addCharacterButton.disabled = false;
+    });
+    extraCharacters.appendChild(row);
+    if (rows.length + 1 >= 3) addCharacterButton.disabled = true;
+  });
+
+  async function retryGeneration() {
+    if (!currentStory) return;
+    retryButton.disabled = true;
+    retryEmptyButton.disabled = true;
+    try {
+      const response = await fetch(`/api/stories/${currentStory.id}/retry/`, {
+        method: "POST",
+        headers: { "X-CSRFToken": csrfToken(), "X-Story-Token": publishToken },
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not retry generation.");
+      const generationRequest = ++activeGenerationRequest;
+      success.hidden = false;
+      renderStorybook(body.story);
+      await pollForStoryUpdates(currentStory.id, generationRequest);
+    } catch (error) {
+      readerGenerationStatus.textContent = error instanceof Error ? error.message : "Could not retry generation.";
+    } finally {
+      retryButton.disabled = false;
+      retryEmptyButton.disabled = false;
+    }
+  }
+  retryButton.addEventListener("click", retryGeneration);
+  retryEmptyButton.addEventListener("click", retryGeneration);
+
   reset.addEventListener("click", function () {
     activeGenerationRequest += 1;
     form.reset();
+    extraCharacters.innerHTML = "";
+    addCharacterButton.disabled = false;
     form.hidden = false;
     success.hidden = true;
     storybook.hidden = true;
@@ -273,13 +383,16 @@
   });
 
   publishConsent.addEventListener("change", function () {
-    publishButton.disabled = !publishConsent.checked;
+    publishButton.disabled = !publishConsent.checked || !currentStory || currentStory.status !== "COMPLETE";
+    publishButton.textContent = publishConsent.checked
+      ? "Confirm addition to community library"
+      : "Add to community library";
   });
   publishButton.addEventListener("click", updateLibraryVisibility);
 
   document.querySelector("#download-link").addEventListener("click", async function (event) {
     event.preventDefault();
-    if (!currentStory || !publishToken) return;
+    if (!currentStory) return;
     const link = event.currentTarget;
     link.setAttribute("aria-busy", "true");
     downloadStatus.textContent = "Preparing your book...";
@@ -313,4 +426,77 @@
     event.currentTarget.setAttribute("aria-expanded", String(expanded));
     event.currentTarget.textContent = expanded ? "Hide all pages" : "View all pages";
   });
+
+  async function deleteCurrentStory() {
+    if (!currentStory || !window.confirm("Delete this story and its private reference photo? This cannot be undone.")) return;
+    deleteStoryButton.disabled = true;
+    deleteStoryEmptyButton.disabled = true;
+    try {
+      const response = await fetch(`/api/stories/${currentStory.id}/delete/`, {
+        method: "POST",
+        headers: { "X-CSRFToken": csrfToken(), "X-Story-Token": publishToken },
+      });
+      if (!response.ok) throw new Error("Could not delete this story.");
+      sessionStorage.removeItem(`storybook-token-${currentStory.id}`);
+      currentStory = null;
+      reset.click();
+      window.history.replaceState(null, "", "/");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (error) {
+      readerGenerationStatus.textContent = error instanceof Error ? error.message : "Could not delete this story.";
+    } finally {
+      deleteStoryButton.disabled = false;
+      deleteStoryEmptyButton.disabled = false;
+    }
+  }
+  deleteStoryButton.addEventListener("click", deleteCurrentStory);
+  deleteStoryEmptyButton.addEventListener("click", deleteCurrentStory);
+
+  const existingStoryId = new URLSearchParams(window.location.search).get("story");
+  if (existingStoryId) {
+    publishToken = sessionStorage.getItem(`storybook-token-${existingStoryId}`) || "";
+    fetch(`/api/stories/${existingStoryId}/`, {
+      credentials: "same-origin",
+      headers: { "X-Story-Token": publishToken },
+    })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "This story is not available.");
+        form.hidden = true;
+        success.hidden = false;
+        document.querySelector("#success-title").textContent = body.story.title || "Your storybook";
+        document.querySelector("#success-copy").textContent = "Your saved storybook is ready to read.";
+        const generationRequest = ++activeGenerationRequest;
+        renderStorybook(body.story);
+        if (["QUEUED", "GENERATING", "OUTLINE_READY"].includes(body.story.status)) {
+          await pollForStoryUpdates(body.story.id, generationRequest);
+        }
+      })
+      .catch((error) => {
+        errorBox.textContent = error instanceof Error ? error.message : "Could not open this story.";
+        errorBox.hidden = false;
+      });
+  }
+
+  const reportButton = document.querySelector("#report-button");
+  if (reportButton) {
+    reportButton.addEventListener("click", async function () {
+      if (!currentStory) return;
+      const reportStatus = document.querySelector("#report-status");
+      reportButton.disabled = true;
+      try {
+        const response = await fetch(`/api/stories/${currentStory.id}/report/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
+          body: JSON.stringify({ reason: document.querySelector("#report-reason").value, details: document.querySelector("#report-details").value }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "Could not send report.");
+        reportStatus.textContent = body.message;
+      } catch (error) {
+        reportStatus.textContent = error instanceof Error ? error.message : "Could not send report.";
+        reportButton.disabled = false;
+      }
+    });
+  }
 })();

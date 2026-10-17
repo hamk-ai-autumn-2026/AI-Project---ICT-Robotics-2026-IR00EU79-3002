@@ -13,6 +13,7 @@ class StoryForm(forms.ModelForm):
             "favorite_theme",
             "reading_level",
             "moral_lesson",
+            "art_style",
         ]
         labels = {
             "child_name": "Child's name",
@@ -21,6 +22,7 @@ class StoryForm(forms.ModelForm):
             "favorite_theme": "Favorite animal or theme",
             "reading_level": "Reading level",
             "moral_lesson": "Moral or lesson to teach",
+            "art_style": "Illustration style",
         }
         widgets = {
             "child_appearance": forms.Textarea(

@@ -9,12 +9,22 @@ export const READING_LEVELS = [
 
 export type ReadingLevel = (typeof READING_LEVELS)[number]["value"];
 
+export const ART_STYLES = [
+  { value: "watercolor", label: "Warm watercolor" },
+  { value: "pencil", label: "Pencil illustration" },
+  { value: "anime", label: "Semi-realistic anime" },
+  { value: "3d-animation", label: "Polished 3D animation" },
+] as const;
+
+export type ArtStyle = (typeof ART_STYLES)[number]["value"];
+
 export type StoryFormInput = {
   childName: string;
   childAppearance: string;
   favoriteTheme: string;
   readingLevel: ReadingLevel;
   moralLesson: string;
+  artStyle: ArtStyle;
 };
 
 export type StoryStatus =

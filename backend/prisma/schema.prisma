@@ -38,6 +38,7 @@ model Story {
   favoriteTheme  String // e.g. "dinosaurs", "space", "favorite animal: fox"
   readingLevel   String // e.g. "beginner", "early-reader", "confident-reader"
   moralLesson    String // e.g. "sharing is caring"
+  artStyle       String   @default("watercolor") // selected illustration style
 
   // --- LLM output ---
   title     String?

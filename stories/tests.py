@@ -1,12 +1,17 @@
 import json
 import hashlib
 import re
+import tempfile
+from io import BytesIO
 from unittest import mock
 
-from django.test import TestCase
+from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
+from PIL import Image
 
-from .models import Asset, Page, Story
+from .models import Asset, Page, Story, StoryCharacter, StoryReport
 from .services import image as image_service
 from .services import text as text_service
 from .services.pipeline import StoryGenerationError, generate_story_content
@@ -136,6 +141,115 @@ class SitePageTests(TestCase):
         self.assertContains(response, "Prepare email")
 
 
+class AccountAndPrivacyTests(TestCase):
+    def test_signup_signin_and_private_bookshelf(self):
+        signup = self.client.post(
+            reverse("signup"),
+            {"username": "reader", "password1": "StrongPassword-123!", "password2": "StrongPassword-123!"},
+        )
+        self.assertEqual(signup.status_code, 302)
+        self.assertEqual(signup.url, reverse("my-books-list"))
+        response = self.client.post(
+            reverse("create-story"),
+            data=json.dumps({
+                "childName": "Amara", "childAppearance": "Curly hair", "favoriteTheme": "foxes",
+                "readingLevel": "early-reader", "moralLesson": "Be kind",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Story.objects.get().owner.username, "reader")
+        self.assertContains(self.client.get(reverse("my-books-list")), "Amara")
+
+    def test_private_story_cannot_be_read_by_another_account(self):
+        owner = get_user_model().objects.create_user(username="owner", password="password123")
+        other = get_user_model().objects.create_user(username="other", password="password123")
+        story = _make_story(owner=owner)
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(reverse("story-detail", args=[story.id])).status_code, 404)
+
+    def test_supporting_characters_are_saved_and_used_in_mock_story(self):
+        response = self.client.post(
+            reverse("create-story"),
+            data=json.dumps({
+                "childName": "Amara", "childAppearance": "Curly hair", "favoriteTheme": "foxes",
+                "readingLevel": "beginner", "moralLesson": "Be kind",
+                "characters": [{"name": "Milo", "appearance": "Blue scarf", "gender": "boy"}],
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        story = Story.objects.get()
+        self.assertEqual(story.characters.get().name, "Milo")
+        outline = text_service.MockTextProvider().generate_story(story, 1)
+        self.assertIn("Milo", outline.pages[0].text)
+
+    def test_supporting_character_limit_is_validated(self):
+        response = self.client.post(
+            reverse("create-story"),
+            data=json.dumps({
+                "childName": "Amara", "childAppearance": "Curly hair", "favoriteTheme": "foxes",
+                "readingLevel": "beginner", "moralLesson": "Be kind",
+                "characters": [{"name": str(i)} for i in range(4)],
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Story.objects.count(), 0)
+
+    def test_reference_photo_requires_consent_and_is_stored_privately(self):
+        story = _make_story()
+        token = _set_story_token(story)
+        image_buffer = BytesIO()
+        Image.new("RGB", (4, 4), color="white").save(image_buffer, format="PNG")
+        image_bytes = image_buffer.getvalue()
+        with tempfile.TemporaryDirectory() as media_root:
+            storages = {
+                "default": {"BACKEND": "django.core.files.storage.FileSystemStorage", "OPTIONS": {"location": media_root}},
+                "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+            }
+            with override_settings(STORAGES=storages), mock.patch.dict(
+                "os.environ", {"IMAGE_PROVIDER": "fal", "FAL_KEY": "test-key"}
+            ):
+                no_consent = self.client.post(
+                    reverse("upload-reference-photo", args=[story.id]),
+                    {"photo": SimpleUploadedFile("reference.png", image_bytes, content_type="image/png")},
+                    HTTP_X_STORY_TOKEN=token,
+                )
+                self.assertEqual(no_consent.status_code, 400)
+                uploaded = self.client.post(
+                    reverse("upload-reference-photo", args=[story.id]),
+                    {"photo": SimpleUploadedFile("reference.png", image_bytes, content_type="image/png"), "consent": "true"},
+                    HTTP_X_STORY_TOKEN=token,
+                )
+                self.assertEqual(uploaded.status_code, 201)
+                story.refresh_from_db()
+                self.assertTrue(story.reference_photo_consent)
+                self.assertTrue(story.reference_photo.path.startswith(media_root))
+
+    def test_photo_reference_is_disabled_for_mock_image_provider(self):
+        story = _make_story()
+        token = _set_story_token(story)
+        with mock.patch.dict("os.environ", {"IMAGE_PROVIDER": "mock", "FAL_KEY": ""}):
+            response = self.client.post(
+                reverse("upload-reference-photo", args=[story.id]),
+                {"photo": SimpleUploadedFile("reference.png", b"mock", content_type="image/png"), "consent": "true"},
+                HTTP_X_STORY_TOKEN=token,
+            )
+        self.assertEqual(response.status_code, 409)
+
+    def test_authenticated_reader_can_report_public_story_once(self):
+        user = get_user_model().objects.create_user(username="reporter", password="password123")
+        story = _make_story(status="COMPLETE", is_public=True, moderation_status="APPROVED")
+        self.client.force_login(user)
+        payload = json.dumps({"reason": "inappropriate", "details": "Please review this book."})
+        first = self.client.post(reverse("report-story", args=[story.id]), data=payload, content_type="application/json")
+        second = self.client.post(reverse("report-story", args=[story.id]), data=payload, content_type="application/json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(StoryReport.objects.count(), 1)
+
+
 def _make_story(**overrides):
     defaults = dict(
         child_name="Amara",
@@ -196,6 +310,8 @@ class StoryLibraryTests(TestCase):
         response = self.set_visibility(True)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["story"]["isPublic"])
+        self.story.refresh_from_db()
+        self.assertEqual(self.story.moderation_status, "APPROVED")
         library = self.client.get(reverse("story-library"))
         self.assertContains(library, self.story.title)
         self.assertContains(library, f"/library/{self.story.id}/")
@@ -253,6 +369,20 @@ class MockProviderTests(TestCase):
         self.assertTrue(result["url"].startswith("https://"))
         self.assertEqual(result["provider"], "mock")
 
+    @mock.patch("stories.services.image.requests.post")
+    @mock.patch("fal_client.upload_file", return_value="https://fal.media/reference.jpg")
+    def test_fal_provider_uses_consenting_reference_model(self, upload_file, post):
+        response = mock.Mock()
+        response.json.return_value = {"images": [{"url": "https://fal.media/output.jpg"}]}
+        post.return_value = response
+        with mock.patch.dict("os.environ", {"FAL_KEY": "test-key", "FAL_MODEL": "fal-ai/flux/schnell"}):
+            provider = image_service.FalImageProvider()
+            result = provider.generate_image("A child in a forest", reference_photo="private/reference.jpg")
+        self.assertEqual(result["provider"], "fal:fal-ai/flux-pro/kontext")
+        upload_file.assert_called_once_with("private/reference.jpg")
+        self.assertEqual(post.call_args.args[0], "https://fal.run/fal-ai/flux-pro/kontext")
+        self.assertEqual(post.call_args.kwargs["json"]["image_url"], "https://fal.media/reference.jpg")
+
     def test_get_text_provider_defaults_to_mock(self):
         with mock.patch.dict("os.environ", {}, clear=False):
             os_environ = __import__("os").environ
@@ -304,6 +434,22 @@ class PipelineTests(TestCase):
         self.assertEqual(len(pages), text_service.page_count_for(story.reading_level))
         self.assertNotEqual(pages[0].summary, "stale")
 
+    def test_image_retry_keeps_completed_pages_and_only_generates_missing_assets(self):
+        story = _make_story(status="FAILED", failed_stage="image")
+        complete_page = Page.objects.create(story=story, page_number=1, summary="Saved page", image_prompt="Keep this")
+        Asset.objects.create(page=complete_page, url="https://example.test/ready.jpg", provider="mock", storage_path="")
+        missing_page = Page.objects.create(story=story, page_number=2, summary="Needs art", image_prompt="A missing image")
+        image_provider = image_service.MockImageProvider()
+        with mock.patch("stories.services.pipeline.get_text_provider", side_effect=AssertionError("text should be reused")), \
+             mock.patch("stories.services.pipeline.get_image_provider", return_value=image_provider), \
+             mock.patch.object(image_provider, "generate_image", wraps=image_provider.generate_image) as generate_image:
+            result = generate_story_content(story, retry_only=True)
+        self.assertEqual(result.status, "COMPLETE")
+        self.assertEqual(generate_image.call_count, 1)
+        self.assertTrue(Asset.objects.filter(page=missing_page).exists())
+        complete_page.asset.refresh_from_db()
+        self.assertEqual(complete_page.asset.url, "https://example.test/ready.jpg")
+
 
 class GenerateStoryEndpointTests(TestCase):
     @mock.patch("stories.views._start_story_generation")
@@ -315,28 +461,52 @@ class GenerateStoryEndpointTests(TestCase):
             HTTP_X_STORY_TOKEN=token,
         )
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.json()["story"]["status"], "GENERATING")
+        self.assertEqual(response.json()["story"]["status"], "QUEUED")
         self.assertEqual(response.json()["story"]["pages"], [])
         start_generation.assert_called_once_with(story.id)
 
-    def test_background_generation_completes_story_with_mock_providers(self):
-        from .views import _generate_story_in_background
+    @mock.patch("stories.views._start_story_generation")
+    def test_failed_story_can_be_retried(self, start_generation):
+        story = _make_story(status="FAILED", error_message="Image generation failed", failed_stage="image")
+        Page.objects.create(story=story, page_number=1, summary="A saved page", image_prompt="A child")
+        token = _set_story_token(story)
+        response = self.client.post(reverse("retry-story-generation", args=[story.id]), HTTP_X_STORY_TOKEN=token)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["story"]["status"], "QUEUED")
+        start_generation.assert_called_once_with(story.id)
 
+    @mock.patch("stories.views._start_story_generation", side_effect=RuntimeError("broker unavailable"))
+    def test_queue_failure_is_visible_and_story_can_be_retried(self, start_generation):
+        story = _make_story()
+        token = _set_story_token(story)
+        response = self.client.post(reverse("generate-story", args=[story.id]), HTTP_X_STORY_TOKEN=token)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["story"]["status"], "FAILED")
+        start_generation.assert_called_once_with(story.id)
+
+    def test_story_owner_can_delete_private_story(self):
+        user = get_user_model().objects.create_user(username="deleter", password="password123")
+        story = _make_story(owner=user)
+        self.client.force_login(user)
+        response = self.client.post(reverse("delete-story", args=[story.id]))
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Story.objects.filter(pk=story.id).exists())
+
+    def test_background_generation_completes_story_with_mock_providers(self):
         story = _make_story()
         with mock.patch.dict("os.environ", {"TEXT_PROVIDER": "mock", "IMAGE_PROVIDER": "mock"}):
-            _generate_story_in_background(story.id)
+            generate_story_content(story)
         story.refresh_from_db()
         self.assertEqual(story.status, "COMPLETE")
         self.assertEqual(story.pages.count(), text_service.page_count_for(story.reading_level))
 
     def test_background_worker_records_generation_errors(self):
-        from .views import _generate_story_in_background
-
         story = _make_story()
         with mock.patch.dict("os.environ", {"TEXT_PROVIDER": "openrouter"}, clear=False):
             os_environ = __import__("os").environ
             os_environ.pop("OPENROUTER_API_KEY", None)
-            _generate_story_in_background(story.id)
+            with self.assertRaises(StoryGenerationError):
+                generate_story_content(story)
         story.refresh_from_db()
         self.assertEqual(story.status, "FAILED")
         self.assertIn("OPENROUTER_API_KEY", story.error_message)

@@ -13,6 +13,7 @@ export const READING_LEVELS = [
 // Kept in its own file (rather than inline in the route) so the same schema
 // can be reused by tests or by later steps (e.g. regenerate endpoints).
 export const createStorySchema = z.object({
+  artStyle: z.enum(["watercolor", "pencil", "anime", "3d-animation"]).default("watercolor"),
   childName: z.string().trim().min(1, "Child's name is required").max(80),
   childAppearance: z
     .string()
